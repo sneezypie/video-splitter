@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cutaway — Automatic Scene Splitter</title>
+<meta name="description" content="Upload a video, detect every cut automatically, download each clip. Runs entirely in your browser.">
+<style>
+  :root{
+    --bg: #101114;
+    --panel: #17181c;
+    --panel-2: #1d1f24;
+    --border: #2a2c33;
+    --text: #edeef0;
+    --dim: #9a9ca6;
+    --accent: #ffb020;
+    --accent-dim: #4a3714;
+    --danger: #ff6b6b;
+    --radius: 10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:820px;margin:0 auto;padding:48px 20px 96px;}
+  header{margin-bottom:8px;}
+  header h1{
+    font-size:28px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    margin:0 0 6px;
+  }
+  header p{color:var(--dim);margin:0;font-size:15px;}
+  .cutmark{width:100%;height:10px;margin:22px 0 32px;opacity:.9;}
+
+  .dropzone{
+    border:1.5px dashed var(--border);
+    border-radius:var(--radius);
+    padding:40px 20px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+    background:var(--panel);
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent); background:var(--panel-2);}
+  .dropzone.collapsed{padding:16px 20px;}
+  .dropzone.collapsed .dz-sub{display:none;}
+  .dz-title{font-weight:600;margin:0 0 4px;}
+  .dz-sub{color:var(--dim);font-size:13.5px;margin:0;}
+
+  .hidden{display:none !important;}
+
+  .workspace{margin-top:28px;}
+  .preview-row{
+    display:flex;gap:20px;align-items:flex-start;margin-bottom:24px;
+  }
+  #previewVideo{
+    width:280px;max-width:45%;border-radius:var(--radius);background:#000;
+    border:1px solid var(--border);
+  }
+  .meta{flex:1;min-width:0;padding-top:4px;}
+  .meta-row{
+    display:flex;justify-content:space-between;gap:12px;
+    padding:8px 0;border-bottom:1px solid var(--border);
+    font-size:14px;
+  }
+  .meta-row:last-child{border-bottom:none;}
+  .meta-row span{color:var(--dim);}
+  .meta-row strong{font-weight:600;text-align:right;overflow-wrap:anywhere;}
+
+  .controls{
+    display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--border);
+    border-radius:var(--radius);padding:18px;margin-bottom:20px;
+  }
+  .control{display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--dim);flex:1;min-width:180px;}
+  .control input[type=range]{accent-color:var(--accent);}
+  .control select{
+    background:var(--panel-2);color:var(--text);border:1px solid var(--border);
+    border-radius:6px;padding:8px 10px;font-size:14px;
+  }
+  .control span:last-child{color:var(--text);font-variant-numeric:tabular-nums;}
+
+  .btn{
+    appearance:none;border:none;border-radius:8px;
+    padding:11px 18px;font-size:14.5px;font-weight:600;
+    cursor:pointer;transition:opacity .15s ease, transform .05s ease;
+    text-decoration:none;display:inline-flex;align-items:center;justify-content:center;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn.primary{background:var(--accent);color:#1a1200;}
+  .btn.primary:hover:not(:disabled){opacity:.9;}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border);}
+  .btn.ghost:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+  .btn.small{padding:7px 12px;font-size:13px;}
+
+  .status{
+    font-size:13.5px;color:var(--accent);margin:4px 2px 12px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .status::before{
+    content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);
+    animation:pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+  .progress{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:16px;}
+  .progress-fill{height:100%;width:0;background:var(--accent);transition:width .2s ease;}
+
+  .timeline-wrap{margin:8px 0 28px;}
+  .timeline-label{display:flex;justify-content:space-between;font-size:13.5px;color:var(--dim);margin-bottom:8px;}
+  .timeline{
+    position:relative;height:34px;background:var(--panel-2);
+    border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:16px;
+  }
+  .seg{
+    position:absolute;top:0;bottom:0;
+    border-right:2px solid var(--bg);
+  }
+  .seg:nth-child(odd){background:#2a2200;}
+  .seg:nth-child(even){background:#241d05;}
+  .seg:hover{background:var(--accent-dim);}
+
+  .results-wrap{margin-top:8px;}
+  .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .results-head span{font-size:14px;color:var(--dim);}
+  .results{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+    gap:14px;
+  }
+  .clip-card{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    overflow:hidden;display:flex;flex-direction:column;
+  }
+  .clip-card video{width:100%;aspect-ratio:16/9;background:#000;display:block;}
+  .clip-info{padding:10px 12px 4px;display:flex;flex-direction:column;gap:2px;}
+  .clip-info strong{font-size:13.5px;}
+  .clip-info span{font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums;}
+  .clip-card .btn{margin:10px 12px 12px;}
+
+  footer{margin-top:56px;color:var(--dim);font-size:12.5px;text-align:center;}
+  footer a{color:var(--dim);}
+
+  @media (max-width:600px){
+    .preview-row{flex-direction:column;}
+    #previewVideo{width:100%;max-width:100%;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Cutaway</h1>
+    <p>Drop in a video. It finds every cut and hands you the clips — processed entirely in your browser, nothing is uploaded.</p>
+  </header>
+
+  <svg class="cutmark" viewBox="0 0 400 10" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+    <polyline points="0,5 40,5 48,1 56,9 64,1 72,9 80,5 400,5" fill="none" stroke="#ffb020" stroke-width="1.5"/>
+  </svg>
+
+  <section id="dropzone" class="dropzone">
+    <input type="file" id="fileInput" accept="video/*" hidden>
+    <p class="dz-title" id="dzTitle">Drop a video here, or click to browse</p>
+    <p class="dz-sub">MP4, MOV, WebM, MKV — best kept under a few hundred MB for browser memory</p>
+  </section>
+
+  <section id="workspace" class="workspace hidden">
+    <div class="preview-row">
+      <video id="previewVideo" controls muted></video>
+      <div class="meta">
+        <div class="meta-row"><span>File</span><strong id="metaName">—</strong></div>
+        <div class="meta-row"><span>Duration</span><strong id="metaDuration">—</strong></div>
+        <div class="meta-row"><span>Size</span><strong id="metaSize">—</strong></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <label class="control">
+        <span>Cut sensitivity — lower catches more cuts</span>
+        <input type="range" id="threshold" min="0.10" max="0.90" step="0.05" value="0.40">
+        <span id="thresholdVal">0.40</span>
+      </label>
+      <label class="control">
+        <span>Export mode</span>
+        <select id="mode">
+          <option value="fast">Fast — snaps to nearest keyframe</option>
+          <option value="precise">Precise — re-encodes, exact cuts, slower</option>
+        </select>
+      </label>
+      <button id="detectBtn" class="btn primary">Detect cuts</button>
+    </div>
+
+    <div id="status" class="status hidden"></div>
+    <div id="progressBar" class="progress hidden"><div class="progress-fill"></div></div>
+
+    <div id="timelineWrap" class="timeline-wrap hidden">
+      <div class="timeline-label">
+        <span id="cutCount"></span>
+        <span>drag the sensitivity slider and re-detect if this looks off</span>
+      </div>
+      <div id="timeline" class="timeline"></div>
+      <button id="splitBtn" class="btn primary">Split into clips</button>
+    </div>
+
+    <div id="resultsWrap" class="results-wrap hidden">
+      <div class="results-head">
+        <span id="resultsCount"></span>
+        <button id="downloadAllBtn" class="btn ghost">Download all (.zip)</button>
+      </div>
+      <div id="results" class="results"></div>
+    </div>
+  </section>
+
+  <footer>
+    Built with <a href="https://github.com/ffmpegwasm/ffmpeg.wasm" target="_blank" rel="noopener">ffmpeg.wasm</a> — scene detection runs a full decode pass locally, so processing time scales with video length.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script type="module">
+import { FFmpeg } from "https://esm.sh/@ffmpeg/ffmpeg@0.12.10";
+import { fetchFile, toBlobURL } from "https://esm.sh/@ffmpeg/util@0.12.1";
+
+const $ = (id) => document.getElementById(id);
+const dropzone = $('dropzone'), dzTitle = $('dzTitle'), fileInput = $('fileInput');
+const workspace = $('workspace'), previewVideo = $('previewVideo');
+const metaName = $('metaName'), metaDuration = $('metaDuration'), metaSize = $('metaSize');
+const thresholdInput = $('threshold'), thresholdVal = $('thresholdVal'), modeSelect = $('mode');
+const detectBtn = $('detectBtn'), statusEl = $('status');
+const progressBar = $('progressBar'), progressFill = progressBar.querySelector('.progress-fill');
+const timelineWrap = $('timelineWrap'), timeline = $('timeline'), cutCount = $('cutCount'), splitBtn = $('splitBtn');
+const resultsWrap = $('resultsWrap'), resultsCount = $('resultsCount'), resultsEl = $('results'), downloadAllBtn = $('downloadAllBtn');
+
+let ffmpeg = null, ffmpegLoaded = false, logBuffer = [];
+let currentFile = null, currentExt = 'mp4', duration = 0;
+let cutTimes = [], clipBlobs = [], objectUrls = [];
+
+thresholdInput.addEventListener('input', () => {
+  thresholdVal.textContent = Number(thresholdInput.value).toFixed(2);
+});
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', e => { e.preventDefault(); dropzone.classList.remove('drag'); });
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+function loadFile(file) {
+  resetResults();
+  currentFile = file;
+  currentExt = (file.name.split('.').pop() || 'mp4').toLowerCase();
+  const url = URL.createObjectURL(file);
+  objectUrls.push(url);
+  previewVideo.src = url;
+  previewVideo.onloadedmetadata = () => {
+    duration = previewVideo.duration;
+    metaDuration.textContent = formatTime(duration);
+  };
+  metaName.textContent = file.name;
+  metaSize.textContent = formatSize(file.size);
+  dzTitle.textContent = `Loaded: ${file.name}`;
+  dropzone.classList.add('collapsed');
+  workspace.classList.remove('hidden');
+}
+
+function resetResults() {
+  timelineWrap.classList.add('hidden');
+  resultsWrap.classList.add('hidden');
+  timeline.innerHTML = '';
+  resultsEl.innerHTML = '';
+  cutTimes = [];
+  clipBlobs.forEach(c => URL.revokeObjectURL(c.url));
+  clipBlobs = [];
+  hideStatus(); hideProgress();
+}
+
+function setStatus(msg){ statusEl.textContent = msg; statusEl.classList.remove('hidden'); }
+function hideStatus(){ statusEl.classList.add('hidden'); }
+function setProgress(frac){
+  progressBar.classList.remove('hidden');
+  progressFill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+}
+function hideProgress(){ progressBar.classList.add('hidden'); progressFill.style.width = '0%'; }
+
+function formatTime(t){
+  if (!isFinite(t)) return '—';
+  const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), s = Math.floor(t%60);
+  const pad = n => String(n).padStart(2,'0');
+  return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+function formatSize(bytes){
+  const units = ['B','KB','MB','GB']; let i = 0, n = bytes;
+  while (n >= 1024 && i < units.length-1){ n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+async function ensureFFmpeg(){
+  if (ffmpegLoaded) return;
+  setStatus('Loading video engine (first run only, ~25MB, cached after)…');
+  ffmpeg = new FFmpeg();
+  ffmpeg.on('log', ({ message }) => logBuffer.push(message));
+  ffmpeg.on('progress', ({ progress }) => { if (progress >= 0 && progress <= 1) setProgress(progress); });
+  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+  });
+  ffmpegLoaded = true;
+}
+
+function dedupe(arr, minGap){
+  const out = [];
+  for (const t of arr) if (out.length === 0 || t - out[out.length-1] >= minGap) out.push(t);
+  return out;
+}
+
+function segmentsFromCuts(){
+  const bounds = [0, ...cutTimes.filter(t => t > 0.1 && t < duration - 0.1), duration];
+  const segs = [];
+  for (let i = 0; i < bounds.length - 1; i++){
+    const start = bounds[i], end = bounds[i+1];
+    if (end - start > 0.2) segs.push({ start, end });
+  }
+  return segs;
+}
+
+detectBtn.addEventListener('click', async () => {
+  if (!currentFile) return;
+  detectBtn.disabled = true;
+  timelineWrap.classList.add('hidden');
+  resultsWrap.classList.add('hidden');
+  try {
+    await ensureFFmpeg();
+    setStatus('Reading video into the engine…');
+    const inputName = `input.${currentExt}`;
+    await ffmpeg.writeFile(inputName, await fetchFile(currentFile));
+
+    setStatus('Scanning for cuts — this reads the whole video once…');
+    logBuffer = [];
+    const threshold = Number(thresholdInput.value);
+    await ffmpeg.exec(['-i', inputName, '-vf', `select='gt(scene,${threshold})',showinfo`, '-an', '-f', 'null', '-']);
+
+    const times = [];
+    const re = /pts_time:([\d.]+)/g;
+    for (const line of logBuffer){
+      let m;
+      while ((m = re.exec(line)) !== null) times.push(parseFloat(m[1]));
+    }
+    cutTimes = dedupe(times.sort((a,b) => a-b), 0.75);
+    renderTimeline();
+    hideStatus();
+  } catch (err){
+    console.error(err);
+    setStatus('Scan failed — try a different file or reload the page.');
+  } finally {
+    detectBtn.disabled = false;
+    hideProgress();
+  }
+});
+
+function renderTimeline(){
+  const segs = segmentsFromCuts();
+  timeline.innerHTML = '';
+  segs.forEach(seg => {
+    const block = document.createElement('div');
+    block.className = 'seg';
+    block.style.left = `${(seg.start/duration)*100}%`;
+    block.style.width = `${((seg.end-seg.start)/duration)*100}%`;
+    block.title = `${formatTime(seg.start)} – ${formatTime(seg.end)}`;
+    timeline.appendChild(block);
+  });
+  cutCount.textContent = segs.length <= 1
+    ? 'No clear cuts found at this sensitivity'
+    : `${segs.length} clips detected`;
+  timelineWrap.classList.remove('hidden');
+  splitBtn.disabled = segs.length < 1;
+}
+
+splitBtn.addEventListener('click', async () => {
+  const segs = segmentsFromCuts();
+  if (!segs.length) return;
+  splitBtn.disabled = true;
+  resultsEl.innerHTML = '';
+  clipBlobs.forEach(c => URL.revokeObjectURL(c.url));
+  clipBlobs = [];
+  resultsWrap.classList.remove('hidden');
+  resultsCount.textContent = '';
+
+  const mode = modeSelect.value;
+  const inputName = `input.${currentExt}`;
+
+  for (let i = 0; i < segs.length; i++){
+    const { start, end } = segs[i];
+    const dur = end - start;
+    setStatus(`Cutting clip ${i+1} of ${segs.length}…`);
+    setProgress(i/segs.length);
+    const outExt = mode === 'precise' ? 'mp4' : currentExt;
+    const outName = `clip_${String(i+1).padStart(2,'0')}.${outExt}`;
+    const args = mode === 'precise'
+      ? ['-ss', String(start), '-i', inputName, '-t', String(dur), '-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', outName]
+      : ['-ss', String(start), '-i', inputName, '-t', String(dur), '-c', 'copy', '-avoid_negative_ts', 'make_zero', outName];
+    try {
+      await ffmpeg.exec(args);
+      const data = await ffmpeg.readFile(outName);
+      const blob = new Blob([data], { type: mode === 'precise' ? 'video/mp4' : (currentFile.type || 'video/mp4') });
+      const url = URL.createObjectURL(blob);
+      objectUrls.push(url);
+      const clip = { name: clipFileName(i, outExt), blob, url, start, end };
+      clipBlobs.push(clip);
+      appendClipCard(clip, i+1);
+      await ffmpeg.deleteFile(outName).catch(() => {});
+    } catch (err){
+      console.error('Clip failed', i, err);
+    }
+  }
+  await ffmpeg.deleteFile(inputName).catch(() => {});
+  hideStatus(); hideProgress();
+  resultsCount.textContent = `${clipBlobs.length} clip${clipBlobs.length === 1 ? '' : 's'} ready`;
+  splitBtn.disabled = false;
+});
+
+function clipFileName(i, ext){
+  const stem = currentFile.name.replace(/\.[^.]+$/, '') || 'video';
+  return `${stem}_clip${String(i+1).padStart(2,'0')}.${ext}`;
+}
+
+function appendClipCard(clip, index){
+  const card = document.createElement('div');
+  card.className = 'clip-card';
+  const video = document.createElement('video');
+  video.src = clip.url; video.preload = 'metadata'; video.muted = true; video.playsInline = true; video.controls = true;
+  const info = document.createElement('div');
+  info.className = 'clip-info';
+  info.innerHTML = `<strong>Clip ${index}</strong><span>${formatTime(clip.start)} – ${formatTime(clip.end)} · ${formatTime(clip.end-clip.start)}</span>`;
+  const dl = document.createElement('a');
+  dl.className = 'btn ghost small'; dl.href = clip.url; dl.download = clip.name; dl.textContent = 'Download';
+  card.appendChild(video); card.appendChild(info); card.appendChild(dl);
+  resultsEl.appendChild(card);
+}
+
+downloadAllBtn.addEventListener('click', async () => {
+  if (!clipBlobs.length) return;
+  downloadAllBtn.disabled = true;
+  const prevText = downloadAllBtn.textContent;
+  downloadAllBtn.textContent = 'Zipping…';
+  try {
+    const zip = new JSZip();
+    clipBlobs.forEach(c => zip.file(c.name, c.blob));
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(currentFile.name.replace(/\.[^.]+$/, '') || 'clips')}_clips.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } finally {
+    downloadAllBtn.disabled = false;
+    downloadAllBtn.textContent = prevText;
+  }
+});
+</script>
+</body>
+</html>
